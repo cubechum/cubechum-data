@@ -1,0 +1,49 @@
+name: Napi adatcsomag
+
+on:
+  schedule:
+    - cron: "40 20 * * *"   # a tcgcsv build (~20:05 UTC) után
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Építés akkor is, ha nincs újabb adat"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Van újabb adat?
+        id: check
+        run: python should_build.py "https://github.com/${{ github.repository }}/releases/download/latest/manifest.json"
+
+      - name: Adatbázis építése
+        if: steps.check.outputs.build == 'true' || inputs.force
+        run: python build_tcgcsv_db.py
+
+      - name: Ellenőrzés
+        if: steps.check.outputs.build == 'true' || inputs.force
+        run: python check_db.py
+
+      - name: Tömörítés és manifest
+        if: steps.check.outputs.build == 'true' || inputs.force
+        run: python pack.py
+
+      - name: Feltöltés a latest Release-be
+        if: steps.check.outputs.build == 'true' || inputs.force
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest \
+            --title "Legfrissebb adatcsomag" --notes "Automatikusan frissül. Lásd: manifest.json"
+          gh release upload latest cards.sqlite.gz manifest.json --clobber

@@ -1,0 +1,5 @@
+cards.sqlite
+cards.sqlite.gz
+manifest.json
+tcgcsv_cache/
+__pycache__/
