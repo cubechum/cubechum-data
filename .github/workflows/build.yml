@@ -33,6 +33,13 @@ jobs:
         if: steps.check.outputs.build == 'true' || inputs.force
         run: python build_tcgcsv_db.py
 
+      # Az EUR árak (Cardmarket) kiegészítések: ha ez a lépés elbukik, az USD
+      # adatcsomag EUR nélkül is kimegy (a script csak egészben írja az adatot).
+      - name: EUR árak hozzáadása (Cardmarket)
+        if: steps.check.outputs.build == 'true' || inputs.force
+        continue-on-error: true
+        run: python add_eur_prices.py
+
       - name: Ellenőrzés
         if: steps.check.outputs.build == 'true' || inputs.force
         run: python check_db.py
