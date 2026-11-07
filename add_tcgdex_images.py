@@ -25,6 +25,7 @@ import tarfile
 import time
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from datetime import date, timedelta
 
 TCGDEX_TARBALL = "https://codeload.github.com/tcgdex/cards-database/tar.gz/refs/heads/master"
@@ -73,15 +74,15 @@ def load_urls() -> dict[int, str]:
         if len(parts) != 3:
             continue
         serie, setname, local = parts
-        pid = None
-        for block in BLOCK_RE.findall(text):
-            m = TP_RE.search(block)
-            if m:
-                pid = int(m.group(1))
+        # A kártya fájlja változatonként (normál, reverse, 1st Edition...) külön
+        # thirdParty blokkot tartalmaz, mindegyikben más TCGplayer productId-val.
+        # Mind ugyanazt a képet kapja, ezért MINDEN azonosítót felvesszük.
+        pids = [int(m) for block in BLOCK_RE.findall(text) for m in TP_RE.findall(block)]
         sid, zid = serie_id.get(serie), set_id.get((serie, setname))
-        if pid is None or not sid or not zid:
+        if not pids or not sid or not zid:
             continue
-        urls[pid] = f"{ASSETS}/{sid}/{zid}/{local}/low.webp"
+        for pid in pids:
+            urls[pid] = f"{ASSETS}/{sid}/{zid}/{local}/low.webp"
     if len(urls) < MIN_URLS:
         raise SystemExit(f"Gyanúsan kevés TCGdex képcím: {len(urls)}")
     return urls
@@ -144,9 +145,31 @@ def main() -> None:
     today = date.today().isoformat()
     cutoff = (date.today() - timedelta(days=RECHECK_DAYS)).isoformat()
 
-    # Ellenőrizendő: azoknak, akiknek van TCGdex címük. Akinek nincs, azt nem kell
-    # kérni, az azonnal "nincs kép".
-    todo = [p for p in products if p in urls and due(state.get(str(p)), cutoff)]
+    # Egy képcímhez több productId tartozhat (változatok). Az ellenőrzés eredménye
+    # a közös címen belül azonos, ezért egy kérés az összesre érvényes.
+    pids_of: dict[str, list[int]] = defaultdict(list)
+    for pid, url in urls.items():
+        pids_of[url].append(pid)
+    copied = 0
+    for url, group in pids_of.items():
+        known = [state[str(p)] for p in group if str(p) in state]
+        if not known:
+            continue
+        best = max(known, key=lambda e: e[1])  # a legfrissebb ellenőrzés
+        for p in group:
+            if str(p) not in state:
+                state[str(p)] = best
+                copied += 1
+    print(f"Közös képcímről átmásolt állapot: {copied}")
+
+    # Ellenőrizendő: azoknak, akiknek van TCGdex címük, képcímenként egyszer.
+    # Akinek nincs, azt nem kell kérni, az azonnal "nincs kép".
+    todo: list[int] = []
+    seen_urls: set[str] = set()
+    for p in products:
+        if p in urls and urls[p] not in seen_urls and due(state.get(str(p)), cutoff):
+            seen_urls.add(urls[p])
+            todo.append(p)
     print(f"Ellenőrizendő: {len(todo)} | ebben a futásban: {min(len(todo), args.limit)}")
 
     done = ok = missing = 0
@@ -167,7 +190,8 @@ def main() -> None:
                 print(f"  hiba: {type(e).__name__}: {e} ({urls[pid]})")
             else:
                 errors_in_row = 0
-                state[str(pid)] = [res, today]
+                for sibling in pids_of[urls[pid]]:
+                    state[str(sibling)] = [res, today]
                 done += 1
                 ok += res
                 missing += 1 - res
