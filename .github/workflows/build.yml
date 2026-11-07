@@ -40,6 +40,17 @@ jobs:
         continue-on-error: true
         run: python add_eur_prices.py
 
+      # TCGdex képcímek (assets.tcgdex.net) a TCGplayer helyett. Naponta legfeljebb
+      # 3000 képet ellenőriz; az állapot (image_check.json) a Release mellékleteként
+      # megy tovább napról napra. Hiba esetén a régi képcímek maradnak.
+      - name: TCGdex képek ellenőrzése
+        if: steps.check.outputs.build == 'true' || inputs.force
+        continue-on-error: true
+        run: |
+          gh release download latest -p image_check.json --clobber || echo "Még nincs állapotfájl."
+          python add_tcgdex_images.py cards.sqlite --state image_check.json --limit 3000
+          gh release upload latest image_check.json --clobber
+
       - name: Ellenőrzés
         if: steps.check.outputs.build == 'true' || inputs.force
         run: python check_db.py
