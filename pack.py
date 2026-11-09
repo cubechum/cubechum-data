@@ -1,6 +1,6 @@
 """cards.sqlite -> cards.sqlite.gz + manifest.json
 
-A manifest: { "data_date", "size" (a tÃ¶mÃ¶rÃ­tett fÃ¡jlÃ©), "sha256" (a tÃ¶mÃ¶rÃ­tettÃ©),
+A manifest: { "data_date", "schema", "size" (a tÃ¶mÃ¶rÃ­tett fÃ¡jlÃ©), "sha256" (a tÃ¶mÃ¶rÃ­tettÃ©),
 "uncompressed_size" }. A data_date a cards.sqlite meta tÃ¡blÃ¡jÃ¡bÃ³l jÃ¶n.
 """
 import gzip
@@ -18,7 +18,11 @@ def main() -> None:
     db = sqlite3.connect(SRC)
     (data_date,) = db.execute("SELECT value FROM meta WHERE key='data_date'").fetchone()
     (cards,) = db.execute("SELECT COUNT(*) FROM cards").fetchone()
+    row = db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
     db.close()
+    if row is None:
+        raise SystemExit("A meta táblában nincs schema: nem tudjuk, milyen szerkezetű")
+    schema = row[0]
     if cards < 20000:  # védelem: egy csonka build ne írja felül a jó csomagot
         raise SystemExit(f"Gyanúsan kevés kártya: {cards}")
 
@@ -27,6 +31,9 @@ def main() -> None:
 
     manifest = {
         "data_date": data_date,
+        # Az adatbázis szerkezeti verziója: a régi appok ebből tudják, hogy az
+        # újabb szerkezetű csomagot nem szabad letölteniük.
+        "schema": schema,
         "size": GZ.stat().st_size,
         "sha256": hashlib.sha256(GZ.read_bytes()).hexdigest(),
         "uncompressed_size": SRC.stat().st_size,
